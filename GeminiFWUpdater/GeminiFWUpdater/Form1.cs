@@ -19,8 +19,9 @@ namespace GeminiReaderUpdaterGUI
         private string getPropertyCommand, getDeviceUIDCommand, resetCommand, firmwareUpdateCommand;
 
         private bool isReaderConnected = false;
+        private bool isFirmwareUpdateInProgress = false;
 
-        private Label lblStatus;
+        private Label lblStatus, lblUpdateStatus;
         private Button btnUpdateFirmware;
         private TextBox deviceUID, console;
         private Panel status;
@@ -96,6 +97,10 @@ namespace GeminiReaderUpdaterGUI
             lblStatus.Text = message;
         }
 
+        private void DisplayUpdateStatusMessage(string message)
+        {
+            lblUpdateStatus.Text = message;
+        }
         private void DisplayConsoleMessage(string message)
         {
             // Ensure that UI updates are done on the UI thread
@@ -184,10 +189,13 @@ namespace GeminiReaderUpdaterGUI
                 }
 
                 firmwareFile = firmwareFiles[0];
-                firmwareUpdateCommand += $" \"{Path.GetFullPath(firmwareFile)}\"";
+                firmwareUpdateCommand = firmwareUpdateCommand + $" \"{Path.GetFullPath(firmwareFile)}\"";
 
                 DisplayInfoMessage("Firmware file found: " + Path.GetFileName(firmwareFile));
                 DisplayConsoleMessage("Firmware file found: " + Path.GetFileName(firmwareFile));
+
+                DisplayInfoMessage("Firmware file path: " + Path.GetFullPath(firmwareFile));
+                DisplayConsoleMessage("Firmware file path: " + Path.GetFullPath(firmwareFile));
 
                 // Enable the firmware update button
                 btnUpdateFirmware.Enabled = true;
@@ -208,13 +216,34 @@ namespace GeminiReaderUpdaterGUI
         {
             try
             {
+                // Check if a firmware update is already in progress
+                if (isFirmwareUpdateInProgress)
+                {
+                    DisplayConsoleMessage("Firmware update is already in progress. Please wait...");
+                    return;
+                }
+
+                // Set the flag to indicate that a firmware update is in progress
+                isFirmwareUpdateInProgress = true;
+                btnUpdateFirmware.Enabled = false;
+
                 // Wait for the firmware update to finish
                 DisplayConsoleMessage("Waiting for firmware update to complete...");
+                DisplayUpdateStatusMessage("Update in progress. Do NOT disconnect the reader.");
 
+                // Ensure the firmwareUpdateCommand contains the correct file path only once
+                //string commandWithFilePath = $"{firmwareUpdateCommand} \"{Path.GetFullPath(firmwareFile)}\"";
                 var (exitCode, output) = await ExecuteBlhostCommandAsync(firmwareUpdateCommand);
 
-                DisplayConsoleMessage("Firmware update completed.");
+                if(exitCode != 0)
+                {
+                    DisplayConsoleMessage($"An error occurred. Resetting the operation.");
+                    ToggleReaderDisconnected();
+                    return;
+                }
 
+                DisplayConsoleMessage("Firmware update completed.");
+                DisplayUpdateStatusMessage("Firmware update finished.");
                 // Delete the firmware file after a successful update
                 DisplayConsoleMessage("Deleting the firmware file...");
                 //File.Delete(firmwareFile);
@@ -223,10 +252,18 @@ namespace GeminiReaderUpdaterGUI
                 RestartReader();
 
                 DisplayConsoleMessage("Gemini reader firmware update completed.");
+
+                await Task.Delay(3000); //Don't catch the same device after restart
+                DisplayUpdateStatusMessage("");
             }
             catch (Exception ex)
             {
                 DisplayConsoleMessage($"An error occurred: {ex.Message}\n{ex.StackTrace}");
+            }
+            finally
+            {
+                // Reset the flag when the firmware update process is complete or encounters an error
+                isFirmwareUpdateInProgress = false;
             }
         }
 
@@ -352,11 +389,12 @@ namespace GeminiReaderUpdaterGUI
         {
             isReaderConnected = false;
             status.Invalidate(); // Trigger the Paint event
-            DisplayInfoMessage("\nReader disconnected. The operation has been canceled. Waiting for the reader to be connected...\n");
-            DisplayConsoleMessage("\nReader disconnected. The operation has been canceled. Waiting for the reader to be connected...\n");
+            DisplayInfoMessage("\nReader disconnected. Waiting for the reader to be connected...\n");
+            DisplayConsoleMessage("\nReader disconnected. Waiting for the reader to be connected...\n");
 
             UpdateReaderUID("");
             btnUpdateFirmware.Enabled = false;
+            firmwareUpdateCommand = $"-u {vidPidSn} receive-sb-file";
         }
 
         private async Task<bool> IsReaderConnectedAsync()
