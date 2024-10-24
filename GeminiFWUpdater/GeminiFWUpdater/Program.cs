@@ -15,7 +15,7 @@ namespace GeminiFWUpdater
             Application.ThreadException += new System.Threading.ThreadExceptionEventHandler(Application_ThreadException);
             AppDomain.CurrentDomain.UnhandledException += new UnhandledExceptionEventHandler(CurrentDomain_UnhandledException);
 
-            Form1 mainForm = new Form1();
+            MainUpdaterForm mainForm = new MainUpdaterForm();
             Application.Run(mainForm);
         }
 
