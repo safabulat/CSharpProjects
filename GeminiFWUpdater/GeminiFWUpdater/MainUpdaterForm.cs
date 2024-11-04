@@ -4,12 +4,9 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Windows.Forms;
-using System.Management;
 using System.Threading.Tasks;
 using System.Linq;
-using System.Drawing;
 using System.Timers;
-using System.Runtime.InteropServices;
 
 using GeminiFWUpdater;
 using System.IO.Ports;
@@ -17,8 +14,6 @@ using Newtonsoft.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Collections.Generic;
-using System.Text.RegularExpressions;
-using Newtonsoft.Json.Linq;
 using Timer = System.Timers.Timer;
 using static GeminiFWUpdater.GeminiLib;
 
@@ -33,6 +28,12 @@ namespace GeminiReaderUpdaterGUI
         public override string ToString()
         {
             return MainFirmwareVersiyon + "_" + IssueFirmwareVersiyon + "_" + FirmwareBuildTime;
+        }
+        public void Clear()
+        {
+            MainFirmwareVersiyon = null;
+            IssueFirmwareVersiyon = null;
+            FirmwareBuildTime = null;
         }
     }
 
@@ -230,7 +231,7 @@ namespace GeminiReaderUpdaterGUI
             if (geminiHandler == null)
                 geminiHandler = new GeminiLib(geminiReaderLibrariesPath, geminiReaderLibraryName);
             int attemps = 0;
-            while (attemps < 50)
+            while (attemps < 500)
             {
                 int ret = geminiHandler.GetCardUID(out cardUID);
                 if (ret == 0)
@@ -240,10 +241,8 @@ namespace GeminiReaderUpdaterGUI
                 }
                 else
                 {
-                    Console.WriteLine(ret + " - " + cardUID);
                     attemps++;
                 }
-                Thread.Sleep(100);
             }
             readTestCardUIDBTN.Enabled = true;
         }
@@ -284,7 +283,7 @@ namespace GeminiReaderUpdaterGUI
         private void UpdateFirmwareInfo(string mainFWV, string issueFWV, string fwBuildDateTime)
         {
             //if old null-> old , ifnot new
-            if (old_firmwareInfo.MainFirmwareVersiyon == string.Empty)
+            if (old_firmwareInfo.MainFirmwareVersiyon == null)
             {
                 old_firmwareInfo.MainFirmwareVersiyon = mainFWV;
                 old_firmwareInfo.IssueFirmwareVersiyon = issueFWV;
@@ -656,7 +655,7 @@ namespace GeminiReaderUpdaterGUI
         {
             Invoke((MethodInvoker)delegate
             {
-                ChangeStateOnPhysicalConnection();
+                //ChangeStateOnPhysicalConnection();
                 UpdateUIBasedOnState(geminiHandler.currentReaderState);
             });
         }
@@ -928,6 +927,8 @@ namespace GeminiReaderUpdaterGUI
             // Add the Close button event handler
             closeButton.Click += (sender, e) =>
             {
+                old_firmwareInfo.Clear();
+                new_firmwareInfo.Clear();
                 versionChangeForm.Close();
             };
 
@@ -960,7 +961,6 @@ namespace GeminiReaderUpdaterGUI
                         uidLabel.Text = ret + "-" + cardUID;
                         attemps++;
                     }
-                    Thread.Sleep(100);
                 }
                 readCard.Enabled = true;
             };
@@ -1175,6 +1175,89 @@ namespace GeminiReaderUpdaterGUI
             return new string(new[] { chars[2], chars[3], chars[0], chars[1] });
         }
         #endregion
+
+        //private async void StatusCheckTimer_Tick(object sender, EventArgs e)
+        //{
+        //    //await CheckForReaderConnectionAsync();
+        //}
+
+
+
+
+
+        //private async Task CheckForReaderConnectionAsync()
+        //{
+        //    bool isConnected = await IsReaderConnectedAsync("VID_1394", "PID_BC00");
+        //    if (isConnected)
+        //    {
+        //        Console.WriteLine("BootloaderConnected");
+        //        ToggleReaderConnected();
+        //        Console.WriteLine("ForcedToStay BL : Success.");
+
+        //        Console.WriteLine("Phase 2: Start");
+        //    }
+        //    Console.WriteLine("Is connected?: " + isConnected);
+
+        //    status.Invalidate(); // Trigger the Paint event
+
+        //    if (isConnected)
+        //    {
+        //        if (!isReaderConnected)
+        //        {
+        //            ToggleReaderConnected();
+        //        }
+        //    }
+        //    else
+        //    {
+        //        if (isReaderConnected)
+        //        {
+        //            ToggleReaderDisconnected();
+        //        }
+        //    }
+        //}
+
+        //async void ToggleReaderConnected()
+        //{
+
+        //    int exitCode;
+        //    string output;
+
+        //    while (true) {
+        //        // Force reader to stay in the bootloader
+        //        (exitCode, output) = await ExecuteBlhostCommandAsync(getPropertyCommand);
+        //        if (exitCode == 0) break;
+        //        else DisplayConsoleMessage(".");
+        //    }
+
+        //    if (exitCode == 0)
+        //    {
+        //        // Get Unique Device ID
+        //        string uniqueDeviceId = await GetUniqueDeviceIdAsync();
+        //        DisplayInfoMessage($"Reader connected. UID: {uniqueDeviceId}");
+        //        DisplayConsoleMessage($"Reader connected. UID: {uniqueDeviceId}");
+
+        //        // Update the UI with the Unique Device ID
+        //        UpdateReaderUID(uniqueDeviceId);
+
+        //        // Search for the firmware file with the Unique Device ID
+        //        GetUpdateFile(uniqueDeviceId);
+        //    }
+
+        //    isReaderConnected = true;
+        //}
+
+        //void ToggleReaderDisconnected()
+        //{
+        //    isReaderConnected = false;
+        //    status.Invalidate(); // Trigger the Paint event
+        //    DisplayInfoMessage("\nReader disconnected. Waiting for the reader to be connected...\n");
+        //    DisplayConsoleMessage("\nReader disconnected. Waiting for the reader to be connected...\n");
+
+        //    UpdateReaderUID("");
+        //    updateFirmwareBTN.Enabled = false;
+        //    //firmwareUpdateCommand = $"-u {vidPidSn} receive-sb-file";
+        //}
+
 
     }
 }

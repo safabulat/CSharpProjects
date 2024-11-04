@@ -1,6 +1,7 @@
 ﻿using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 
@@ -263,46 +264,169 @@ namespace GeminiFWUpdater
             return !isErr;
         }
         
-
         public int GetCardUID(out string output)
         {
-            ulong respDataLen = 256;
-            byte[] respData = new byte[respDataLen];
-            output = string.Empty;
+            byte[] atq = new byte[2];        // ATQA
+            byte sak = 0x00;                 // SAK
+            byte [] uid = new byte[10];      // Card UID
+            int uidLen = 0;
 
-            // Send Get Report command (0x0E) after polling
-            int ret = (int)SendDirectCommand(hSession, 0x0E, null, 0, respData, ref respDataLen);
-
-            if (ret != 0)
+            if (GetFirstTCLCardA(out atq, out sak, out uid, out uidLen))
             {
-                // No card in field or error occurred
-                if (respDataLen == 0 || ret == 8001)
-                {
-                    output = "NO_CARD_IN_RF.";
-                    return ret;
-                }
-                if (respDataLen == 8051)
-                {
-                    output = "MY_RETRIES_OVER";
-                    return ret;
-                }
-                //throw new Exception("Error: " + ret);
+                output = BitConverter.ToString(uid, 0, uidLen);
+                return 0;
             }
-
-            // Check if card was detected (0x8B response)
-            if (respData[0] != 0x8B)
+            else
             {
-                output = "Card not detected.";
+                output = "";
                 return -1;
             }
+        }
 
-            // Get the UID from the response
-            int snLen = respData[3]; // UID length
-            byte[] cardUID = new byte[snLen];
-            Array.Copy(respData, 4, cardUID, 0, snLen);
+        int SetPollingMode(bool mode)
+        {
+            byte[] cmdBuff = new byte[128];
+            ulong respDataLen = 266;
+            byte[] respData = new byte[respDataLen];  //Buffer contains the Reader response data
+            int res = 0;
 
-            // Convert UID to hex string
-            output = BitConverter.ToString(cardUID).Replace("-", "");
+            cmdBuff[0] = mode ? (byte)0x01 : (byte)0x00; // polling on/off
+            cmdBuff[1] = 0x03; // mask --> bit position for different technologies 0x01 type a 0x02 type a 0x03 both
+            cmdBuff[2] = 0x00; // baudrate A --> For Type A (codded according to ISO 14443-4). 
+            cmdBuff[3] = 0x00; // baudrate B --> For Type b (codded according to ISO 14443-4). 
+            cmdBuff[4] = 0x01; // abort --> ON/OFF abort on any collision 
+            cmdBuff[5] = 0x01; // EMV check --> for EMV card: 0-no looking for EMV card, 1- looking for EMV card 
+            int length = 6;
+
+            //Execute direct command and get the result
+            res = (int)SendDirectCommand(hSession, 0x05, cmdBuff, (ulong)length, respData, ref respDataLen);
+
+            if(res != 0)
+                Console.WriteLine("SendDirectCommand(0x05) SetPollingMode=" + mode + " ErrCode: " + res + " respLen: " + respDataLen);
+
+            return res;
+        }
+
+        private static int pollCounter = 0;
+        private static int errCounter = 0;
+        private static bool isPollingModeActive = false;
+        private const int POLL_RESET_COUNTER = 10; // Adjust as necessary
+
+        public bool GetFirstTCLCardA(out byte[] atq, out byte sak, out byte[] sn, out int snLen)
+        {
+            byte[] respBuff = new byte[266];
+            bool result = false;
+            ulong respLen = (ulong)respBuff.Length;
+            int res = 0;
+            atq = new byte[2];
+            sak = 0;
+            sn = new byte[10];
+            snLen = 0;
+
+            if (hSession == IntPtr.Zero)
+                throw new Exception("GeminiReader communication error");
+
+            if ((pollCounter++) > POLL_RESET_COUNTER)
+            {
+                pollCounter = 0;
+                SetPollingMode(false);
+            }
+            if (!isPollingModeActive)
+            {
+                SetPollingMode(true);
+            }
+
+            res = (int)SendDirectCommand(hSession, 0x0E, null, 0, respBuff, ref respLen);
+            Console.WriteLine("Res: " + res + " rL: " + respLen);
+            if (res == 0 && respLen > 0)
+            {
+                PrintHex("GetReport: ", respBuff, (int)respLen);
+            }
+
+            if (res == 0 && respLen == 0)
+            {
+                Thread.Sleep(10);
+                return false;
+            }
+
+            isPollingModeActive = false;
+
+            if (res != 0)
+            {
+                errCounter++;
+                if (errCounter > 2)
+                {
+                    throw new Exception("Command send error");
+                }
+                pollCounter = POLL_RESET_COUNTER + 1;
+                Thread.Sleep(100);
+                return false;
+            }
+
+            if (respBuff[0] == 0x81 && respBuff[1] == 0x40)
+            {
+                throw new Exception("Collusion detected");
+            }
+
+            if (respBuff[0] != 0x8B)
+            {
+                Thread.Sleep(100);
+                return false;
+            }
+
+            errCounter = 0;
+
+            Thread.Sleep(100);
+            res = RfReset(hSession, 25);
+            if (res > 0)
+                throw new Exception("RfReset error");
+
+            respLen = (ulong)respBuff.Length;
+            Array.Clear(respBuff, 0, respBuff.Length);
+            res = (int)SendDirectCommand(hSession, 0x4A, null, 0, respBuff, ref respLen);
+            if (res != 0 && res != -1)
+                throw new Exception("Command error");
+
+            result = res == 0;
+            Thread.Sleep(100);
+
+            if (result)
+            {
+                //Array.Copy(respBuff, 0, atq, 0, 2);
+                //sak = respBuff[2];
+                snLen = respBuff[3];
+                Array.Copy(respBuff, 4, sn, 0, snLen);
+
+                //PrintHex("atq: ", atq, atq.Length);
+                //PrintHex("PICCuid: ", sn, snLen);
+
+                if (res != 0)
+                    throw new Exception("Incorrect CT in UID");
+            }
+
+            return result;
+        }
+        private void PrintHex(string prefix, byte[] data, int length)
+        {
+            Console.Write(prefix);
+            for (int i = 0; i < length; i++)
+            {
+                Console.Write($"{data[i]:X2} ");
+            }
+            Console.WriteLine();
+        }
+        public int RfReset(IntPtr session, int milliseconds)
+        {
+            byte commandCode = 0x20;
+            byte[] data = BitConverter.GetBytes(milliseconds); // Convert milliseconds to a 4-byte array
+            ulong responseLen = 0;
+
+            // Call SendDirectCommand with the prepared command and data
+            int ret = (int)SendDirectCommand(session, commandCode, data, (ulong)data.Length, null, ref responseLen);
+
+            // Handle response or check result as needed
+            if (ret != 0) // Assuming 0 represents MI_OK
+                Console.WriteLine($"Failed to reset radio field. Error code: {ret}");
 
             return ret;
         }
